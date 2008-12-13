@@ -28,9 +28,11 @@ package NLDPicture70;
 
 requires
   rtl,
-  vcl;
+  vcl,
+  vcljpg;
 
 contains
-  NLDPicture in 'NLDPicture.pas';
+  NLDPicture in 'NLDPicture.pas',
+  NLDPictureReg in 'NLDPictureReg.pas';
 
 end.

@@ -9,8 +9,8 @@
 { *************************************************************************** }
 {                                                                             }
 { Edit by: Albert de Weerd                                                    }
-{ Date: December 4, 2008                                                      }
-{ Version: 2.0.0.2                                                            }
+{ Date: December 13, 2008                                                     }
+{ Version: 2.0.0.3                                                            }
 {                                                                             }
 { *************************************************************************** }
 
@@ -19,7 +19,7 @@ unit NLDPicture;
 interface
 
 uses
-  Classes, Graphics, Forms, SysUtils, Dialogs;
+  Classes, Graphics, Forms, SysUtils, Dialogs, Jpeg;
 
 type
   TCustomNLDPicture = class(TComponent)
@@ -29,10 +29,11 @@ type
     FBitmapResName: String;
     FFileName: TFileName;
     FHeight: Integer;
+    FJpegResName: String;
     FInternalLoading: Boolean;
     FOnChanged: TNotifyEvent;
     FPicture: TPicture;
-    FStretch: Boolean;
+    FStretched: Boolean;
     FWidth: Integer;
     function IsPictureStored: Boolean;
     function IsSizeStored: Boolean;
@@ -41,8 +42,9 @@ type
     procedure SetBitmapResName(const Value: String);
     procedure SetFileName(const Value: TFileName);
     procedure SetHeight(const Value: Integer);
+    procedure SetJpegResName(const Value: String);
     procedure SetPicture(const Value: TPicture);
-    procedure SetStretch(const Value: Boolean);
+    procedure SetStretched(const Value: Boolean);
     procedure SetWidth(const Value: Integer);
   protected
     procedure Changed;
@@ -52,10 +54,11 @@ type
     property FileName: TFileName read FFileName write SetFileName;
     property Height: Integer read FHeight write SetHeight
       stored IsSizeStored;
+    property JpegResName: String read FJpegResName write SetJpegResName;
     property OnChanged: TNotifyEvent read FOnChanged write FOnChanged;
     property Picture: TPicture read FPicture write SetPicture
       stored IsPictureStored;
-    property Stretch: Boolean read FStretch write SetStretch
+    property Stretched: Boolean read FStretched write SetStretched
       default False;
     property Width: Integer read FWidth write SetWidth
       stored IsSizeStored;
@@ -66,7 +69,7 @@ type
   public
     function Empty: Boolean;
     procedure SetSize(const AWidth, AHeight: Integer;
-      const NotifyChange: Boolean); virtual;
+      const NotifyChange: Boolean);
     property Bitmap: TBitmap read FBitmap;
   end;
 
@@ -77,24 +80,19 @@ type
     property OnChanged;
     property FileName;
     property Height;
+    property JpegResName;
     property Picture;
-    property Stretch;
+    property Stretched;
     property Width;
   end;
 
-procedure Register;
-
 implementation
-
-procedure Register;
-begin
-  RegisterComponents('NLDelphi', [TNLDPicture]);
-end;
 
 { TCustomNLDPicture }
 
 resourcestring
   SFileNotFound = 'File not found: %s';
+  SJpegResType = 'JPEG';
 
 procedure TCustomNLDPicture.Assign(Source: TPersistent);
 begin
@@ -104,9 +102,10 @@ begin
     FBitmapResName := TCustomNLDPicture(Source).FBitmapResName;
     FFileName := TCustomNLDPicture(Source).FFileName;
     FHeight := TCustomNLDPicture(Source).FHeight;
+    FJpegResName := TCustomNLDPicture(Source).FJpegResName;
     FOnChanged := TCustomNLDPicture(Source).FOnChanged;
     FPicture.Assign(TCustomNLDPicture(Source).FPicture);
-    FStretch := TCustomNLDPicture(Source).FStretch;
+    FStretched := TCustomNLDPicture(Source).FStretched;
     FWidth := TCustomNLDPicture(Source).FWidth;
     RefreshBitmap;
     Changed;
@@ -147,7 +146,8 @@ end;
 
 function TCustomNLDPicture.IsPictureStored: Boolean;
 begin
-  Result := (FFileName = '') and (FBitmapResName = '') and (not Empty); 
+  Result := (FFileName = '') and (FBitmapResName = '') and
+    (FJpegResName = '') and (not Empty);
 end;
 
 function TCustomNLDPicture.IsSizeStored: Boolean;
@@ -159,8 +159,9 @@ procedure TCustomNLDPicture.PictureChanged(Sender: TObject);
 begin
   if not FInternalLoading then
   begin
-    FFileName := '';
     FBitmapResName := '';
+    FFileName := '';
+    FJpegResName := '';
   end;
   if FAutoSize then
   begin
@@ -182,7 +183,7 @@ begin
   begin
     FBitmap.Width := FWidth;
     FBitmap.Height := FHeight;
-    if FStretch then
+    if FStretched then
       FBitmap.Canvas.StretchDraw(Rect(0, 0, FWidth, FHeight), FPicture.Graphic)
     else
       FBitmap.Canvas.Draw(0, 0, FPicture.Graphic);
@@ -196,7 +197,7 @@ begin
     FAutoSize := Value;
     if FAutoSize then
     begin
-      FStretch := False;
+      FStretched := False;
       FWidth := FPicture.Width;
       FHeight := FPicture.Height;
       RefreshBitmap;
@@ -212,6 +213,7 @@ begin
       FInternalLoading := True;
       FBitmapResName := Value;
       FFileName := '';
+      FJpegResName := '';
       if FBitmapResName = '' then
         FPicture.Graphic := nil
       else
@@ -221,9 +223,7 @@ begin
           on E: EResNotFound do
           begin
             FPicture.Graphic := nil;
-            if csDesigning in ComponentState then
-              ShowMessage(E.Message)
-            else
+            if not (csDesigning in ComponentState) then
               raise;
           end
           else
@@ -241,6 +241,7 @@ begin
       FInternalLoading := True;
       FFileName := Value;
       FBitmapResName := '';
+      FJpegResName := '';
       if FFileName = '' then
         FPicture.Graphic := nil
       else
@@ -257,9 +258,9 @@ begin
               ShowMessage(E.Message)
             else
               raise;
-          end
-          else
-            raise;
+          end;
+        else
+          raise;
         end;
     finally
       FInternalLoading := False;
@@ -275,6 +276,46 @@ begin
       RefreshBitmap;
       Changed;
     end;
+end;
+
+procedure TCustomNLDPicture.SetJpegResName(const Value: String);
+var
+  Stream: TStream;
+  Jpg: TJPEGImage;
+begin
+  if FJpegResName <> Value then
+    try
+      FInternalLoading := True;
+      FJpegResName := Value;
+      FBitmapResName := '';
+      FFileName := '';
+      if FJpegResName = '' then
+        FPicture.Graphic := nil
+      else
+        try
+          Stream := TResourceStream.Create(HInstance, FJpegResName,
+            PChar(SJpegResType));
+          Jpg := TJPEGImage.Create;
+          try
+            Jpg.LoadFromStream(Stream);
+            FPicture.Graphic := Jpg;
+          finally
+            Jpg.Free;
+            Stream.Free;
+          end;
+        except
+          on E: EResNotFound do
+          begin
+            FPicture.Graphic := nil;
+            if not (csDesigning in ComponentState) then
+              raise;
+          end
+          else
+            raise;
+        end;
+    finally
+      FInternalLoading := False;
+  end;
 end;
 
 procedure TCustomNLDPicture.SetPicture(const Value: TPicture);
@@ -298,12 +339,12 @@ begin
     end;
 end;
 
-procedure TCustomNLDPicture.SetStretch(const Value: Boolean);
+procedure TCustomNLDPicture.SetStretched(const Value: Boolean);
 begin
-  if FStretch <> Value then
+  if FStretched <> Value then
     if not FAutoSize then
     begin
-      FStretch := Value;
+      FStretched := Value;
       RefreshBitmap;
       Changed;
     end;
